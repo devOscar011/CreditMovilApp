@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Build paths inside the proj   ect like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -25,7 +25,11 @@ SECRET_KEY = 'django-insecure-l2d2mirs*%mcm3blzr#n0x(el(ws-*&*!p0n$oz!^pio&u^_ex
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*", "granitelike-superambitiously-kaitlin.ngrok-free.dev"]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.ngrok-free.dev",
+]
 
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -44,6 +48,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'validacion',
+    'django_extensions',
 ]
 
 REST_FRAMEWORK = {
@@ -119,8 +124,8 @@ DATABASES = {
    'default': {
        'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'CrediticiaDB', 
-        'USER': 'postgresUser',  
-       'PASSWORD': 'MAUD2023.',
+        'USER': 'postgres',  
+       'PASSWORD': 'Geou0553',
        'HOST': 'localhost',  
        'PORT': '5432',      
     }

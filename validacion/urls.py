@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+
 from .views import (AnalizarFlujoDeCajaAPIView, AnalizarSensibilidadAPIView,
                     CalcularIndiceEndeudamiento, CalcularLTVAPIView,
                     ConyugeViewSet, DomicilioViewSet,
@@ -8,7 +9,7 @@ from .views import (AnalizarFlujoDeCajaAPIView, AnalizarSensibilidadAPIView,
                     LaboralViewSet, LogoutView, PersonaDetalleCompletoView,
                     PersonaViewSet, PruebasDeEstresAPIView,
                     ReferenciaPersonalViewSet, RegisterView, SolicitudViewSet,
-                    TablaAmortizacionCalculada, UserViewSet)
+                    TablaAmortizacionCalculada, UserViewSet, ReporteCreditoPDF)
 
 router = DefaultRouter()
 router.register(r'personas', PersonaViewSet)
@@ -19,6 +20,7 @@ router.register(r'conyuges', ConyugeViewSet)
 router.register(r'gastos', GastosMensualesViewSet)
 router.register(r'referencias', ReferenciaPersonalViewSet)
 router.register(r'usuarios', UserViewSet, basename='usuarios')
+
 
 
 urlpatterns = [
@@ -33,5 +35,7 @@ urlpatterns = [
     path('api/analizar-sensibilidad/', AnalizarSensibilidadAPIView.as_view(), name='analizar-sensibilidad'),
     path('api/pruebas-estres/', PruebasDeEstresAPIView.as_view(), name='pruebas-estres'),
     path('api/ltv/<int:id_persona>/', CalcularLTVAPIView.as_view(), name='calcular-ltv'),
-    
+    path('reporte-credito/<int:persona_id>/', ReporteCreditoPDF.as_view(), name='reporte_credito_pdf'),
 ]
+    
+

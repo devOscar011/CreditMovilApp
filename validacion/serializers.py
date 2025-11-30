@@ -5,7 +5,6 @@ from django.contrib.auth.models import Group
 from .models import (Amortizacion, Conyuge, Domicilio, GastosMensuales,
                      Laboral, Persona, ReferenciaPersonal, Solicitud)
 
-
 class UserSerializer(serializers.ModelSerializer):
     groups = serializers.SlugRelatedField(
         many=True,
@@ -13,7 +12,6 @@ class UserSerializer(serializers.ModelSerializer):
         queryset=Group.objects.all(),
         required=False 
     )
-
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'groups']
