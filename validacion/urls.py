@@ -8,8 +8,8 @@ from .views import (AnalizarFlujoDeCajaAPIView, AnalizarSensibilidadAPIView,
                     EvaluarCapacidadPagoAPIView, GastosMensualesViewSet,
                     LaboralViewSet, LogoutView, PersonaDetalleCompletoView,
                     PersonaViewSet, PruebasDeEstresAPIView,
-                    ReferenciaPersonalViewSet, RegisterView, SolicitudViewSet,
-                    TablaAmortizacionCalculada, UserViewSet, ReporteCreditoPDF)
+                    ReferenciaPersonalViewSet, RegisterView, ReporteCreditoPDFProfesional, SolicitudViewSet,
+                    TablaAmortizacionCalculada, UserViewSet)
 
 router = DefaultRouter()
 router.register(r'personas', PersonaViewSet)
@@ -35,7 +35,9 @@ urlpatterns = [
     path('api/analizar-sensibilidad/', AnalizarSensibilidadAPIView.as_view(), name='analizar-sensibilidad'),
     path('api/pruebas-estres/', PruebasDeEstresAPIView.as_view(), name='pruebas-estres'),
     path('api/ltv/<int:id_persona>/', CalcularLTVAPIView.as_view(), name='calcular-ltv'),
-    path('reporte-credito/<int:persona_id>/', ReporteCreditoPDF.as_view(), name='reporte_credito_pdf'),
+    #path('reporte-credito/<int:persona_id>/', ReporteCreditoPDF.as_view(), name='reporte_credito_pdf'),
+    path('reporte-credito-profesional/<int:persona_id>/', ReporteCreditoPDFProfesional.as_view(), name='reporte-profesional'),
+    
 ]
     
 

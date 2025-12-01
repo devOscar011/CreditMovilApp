@@ -124,8 +124,8 @@ DATABASES = {
    'default': {
        'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'CrediticiaDB', 
-        'USER': 'postgres',  
-       'PASSWORD': 'Geou0553',
+        'USER': 'postgresUser',  
+       'PASSWORD': 'MAUD2023',
        'HOST': 'localhost',  
        'PORT': '5432',      
     }
