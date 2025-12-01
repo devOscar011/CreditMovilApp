@@ -1,0 +1,88 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Static and media files (generados)
+staticfiles/
+static/
+media/
+
+# Django migrations (opcional: si querés ignorarlas)
+# Ojo: si es un proyecto serio, NO ignores migraciones.
+# **Descomenta si querés que no suban al repo**
+# */migrations/
+# !*/migrations/__init__.py
+
+# Virtual environment
+env/
+venv/
+ENV/
+.env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment variables
+*.env
+!.env.example
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# Python packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# celery beat schedule
+celerybeat-schedule
+celerybeat.pid
+
+# dotenv
+.env
+.env.*
