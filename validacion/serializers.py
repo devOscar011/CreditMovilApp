@@ -2,6 +2,8 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 from django.contrib.auth.models import Group
 
+
+
 from .models import (Amortizacion, Conyuge, Domicilio, GastosMensuales,
                      Laboral, Persona, ReferenciaPersonal, Solicitud)
 
@@ -16,22 +18,42 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'groups']
     
+
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     password2 = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    groups = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(),
+        many=True,
+        required=False
+    )
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'password2']
+        fields = ['username', 'email', 'password', 'password2', 'groups']
+        extra_kwargs = {
+            'email': {'required': True}
+        }
 
-    def validate(self, data):
-        if data['password'] != data['password2']:
-            raise serializers.ValidationError("Las contraseñas no coinciden.")
-        return data
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({"password": "Las contraseñas no coinciden."})
+        return attrs
 
     def create(self, validated_data):
-        validated_data.pop('password2')
-        user = User.objects.create_user(**validated_data)
+        password = validated_data.pop('password')
+        password2 = validated_data.pop('password2')
+        groups_data = validated_data.pop('groups', [])
+        
+        user = User.objects.create(**validated_data)
+        user.set_password(password)
+        user.save()
+        
+        # Asignar grupos al usuario
+        for group in groups_data:
+            user.groups.add(group)
+        
         return user
 
 # Serializador para Solicitud

@@ -1,4 +1,5 @@
 from datetime import datetime
+from email.headerregistry import Group
 from io import BytesIO
 
 from django.db import connection
@@ -20,6 +21,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from django.db import connection
+from django.contrib.auth.models import User, Group 
 
 from .models import (
     Persona, Solicitud, Amortizacion, Laboral, Domicilio, Conyuge,
@@ -52,7 +54,6 @@ class LogoutView(APIView):
 
 
 class RegisterView(APIView):
-    #permission_classes = [IsAuthenticated, GroupPermission]
     permission_classes = [IsAuthenticated, IsAdminGroup]
 
     def post(self, request):
@@ -67,6 +68,24 @@ class RegisterView(APIView):
             }
             return Response(data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class GroupListView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminGroup]
+    
+    def get(self, request):
+        try:
+            # Usar Group de django.contrib.auth.models
+            groups = Group.objects.all().values('id', 'name')
+            return Response(list(groups))
+        except Exception as e:
+            print(f"Error obteniendo grupos: {e}")
+            # Si no funciona, devolver grupos por defecto
+            default_groups = [
+                {"id": 1, "name": "Administrador"},
+                {"id": 2, "name": "Analista"},
+                {"id": 3, "name": "Consultor"},
+            ]
+            return Response(default_groups)
 
 
 # -----------------------------------------------------
