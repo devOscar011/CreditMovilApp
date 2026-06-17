@@ -103,7 +103,6 @@ SIMPLE_JWT = {
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -287,4 +286,18 @@ EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@creditapi.com')
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Configure WhiteNoise only when the package is available to avoid import errors
+try:
+    import pkgutil
+    _has_whitenoise = pkgutil.find_loader('whitenoise') is not None
+except Exception:
+    _has_whitenoise = False
+
+if _has_whitenoise:
+    try:
+        # Insert WhiteNoise just after SecurityMiddleware
+        idx = MIDDLEWARE.index('django.middleware.security.SecurityMiddleware') + 1
+    except ValueError:
+        idx = 0
+    MIDDLEWARE.insert(idx, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

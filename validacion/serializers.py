@@ -67,6 +67,9 @@ class PersonaSerializer(serializers.ModelSerializer):
     user = UserSerializer(required=False)
     solicitudes = SolicitudSerializer(many=True, read_only=True)
 
+    # Allow flexible identification formats by removing strict validators
+    NumeroIdentificacion = serializers.CharField(max_length=50, allow_blank=False, required=True, validators=[])
+
     class Meta:
         model = Persona
         fields = '__all__'
