@@ -27,14 +27,44 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY: Load from environment variables
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-CHANGE-THIS-IN-PRODUCTION')
 DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
-ALLOWED_HOSTS = [host.strip() for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
+# Hosts permitidos
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        'ALLOWED_HOSTS',
+        'localhost,127.0.0.1'
+    ).split(',')
+    if host.strip()
+]
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8000').split(',') if origin.strip()]
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
+# Necesario para Railway detrás de HTTPS Proxy
+SECURE_PROXY_SSL_HEADER = (
+    'HTTP_X_FORWARDED_PROTO',
+    'https'
+)
 
+# CORS
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3000,http://localhost:8000'
+    ).split(',')
+    if origin.strip()
+]
 
-# Application definition
+# CSRF Trusted Origins
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CSRF_TRUSTED_ORIGINS',
+        ''
+    ).split(',')
+    if origin.strip()
+]
+
+# Solo permitir todos los orígenes en desarrollo
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 INSTALLED_APPS = [
     'corsheaders',
@@ -226,16 +256,23 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Security Settings for Production
 if not DEBUG:
-    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() in ('true', '1', 'yes')
-    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
-    CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
+    SECURE_SSL_REDIRECT = os.environ.get(
+        'SECURE_SSL_REDIRECT',
+        'False'
+    ).lower() in ('true', '1', 'yes')
+
+    SESSION_COOKIE_SECURE = os.environ.get(
+        'SESSION_COOKIE_SECURE',
+        'True'
+    ).lower() in ('true', '1', 'yes')
+
+    CSRF_COOKIE_SECURE = os.environ.get(
+        'CSRF_COOKIE_SECURE',
+        'True'
+    ).lower() in ('true', '1', 'yes')
+
     SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_SECURITY_POLICY = {
-        'DEFAULT_SRC': ("'self'",),
-        'SCRIPT_SRC': ("'self'", "'unsafe-inline'", "'unsafe-eval'"),
-        'STYLE_SRC': ("'self'", "'unsafe-inline'"),
-        'IMG_SRC': ("'self'", "data:", "https:"),
-    }
+
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
