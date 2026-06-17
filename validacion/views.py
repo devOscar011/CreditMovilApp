@@ -1,6 +1,7 @@
 from datetime import datetime
 from email.headerregistry import Group
 from io import BytesIO
+import base64
 
 from django.db import connection
 from django.http import HttpResponse
@@ -103,11 +104,6 @@ class PersonaDetalleCompletoView(APIView):
 
         serializer = PersonaDetalleCompletoSerializer(persona)
         return Response(serializer.data)
-
-
-# -----------------------------------------------------
-#              TABLA AMORTIZACIÓN
-# -----------------------------------------------------
 
 class TablaAmortizacionCalculada(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
@@ -383,41 +379,148 @@ class TestAmortizacion(APIView):
             "solicitud": solicitud.NumeroSolicitud if solicitud else None
         })
     
-
 class ReporteCreditoPDFProfesional(APIView):
+    """
+    Endpoint único que funciona para Web y Móvil (Expo).
+    Detecta automáticamente el tipo de cliente y devuelve la respuesta adecuada.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, persona_id):
         try:
-            persona = Persona.objects.get(pk=persona_id)
-        except Persona.DoesNotExist:
-            return Response({"detail": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+            # Obtener datos de la persona
+            try:
+                persona = Persona.objects.get(pk=persona_id)
+            except Persona.DoesNotExist:
+                return self._respond_error("Persona no encontrada", status.HTTP_404_NOT_FOUND, request)
 
-        solicitud = Solicitud.objects.filter(IdPersona=persona).first()
-        if not solicitud:
-            return Response({"detail": "No se encontró solicitud"}, status=status.HTTP_404_NOT_FOUND)
+            # Obtener solicitud
+            solicitud = Solicitud.objects.filter(IdPersona=persona).first()
+            if not solicitud:
+                return self._respond_error("No se encontró solicitud", status.HTTP_404_NOT_FOUND, request)
 
-        # Obtener amortizaciones de la base de datos
-        amortizaciones_db = Amortizacion.objects.filter(IdPersona=persona).order_by('Mes')
+            # Obtener o calcular amortizaciones
+            amortizaciones_db = Amortizacion.objects.filter(IdPersona=persona).order_by('Mes')
+            
+            if not amortizaciones_db.exists():
+                amortizaciones = self._calcular_amortizacion(solicitud)
+            else:
+                amortizaciones = list(amortizaciones_db)
+
+            # Generar PDF
+            pdf_bytes = self._generar_pdf(persona, solicitud, amortizaciones)
+            
+            # Determinar tipo de cliente (web o móvil)
+            user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+            is_mobile_app = 'expo' in user_agent or 'reactnative' in user_agent
+            is_mobile_request = request.query_params.get('mobile', 'false').lower() == 'true'
+            
+            # También verificar por header personalizado
+            is_expo_request = request.META.get('HTTP_X_REQUESTED_WITH') == 'Expo'
+            
+            # Si es solicitud móvil o Expo
+            if is_mobile_app or is_mobile_request or is_expo_request:
+                return self._respond_for_mobile(pdf_bytes, persona, solicitud)
+            else:
+                return self._respond_for_web(pdf_bytes, persona)
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error generando PDF: {error_details}")
+            
+            return self._respond_error(
+                f"Error interno: {str(e)}", 
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                request
+            )
+
+    def _respond_for_web(self, pdf_bytes, persona):
+        """Respuesta para navegadores web - descarga directa"""
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f"Informe_Credito_{persona.NumeroIdentificacion[:10]}.pdf"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Length'] = len(pdf_bytes)
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
+
+    def _respond_for_mobile(self, pdf_bytes, persona, solicitud):
+        """Respuesta para móvil/Expo - JSON con base64"""
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
         
-        # Si no hay amortizaciones en la BD, calcularlas
-        if not amortizaciones_db.exists():
-            amortizaciones = self.calcular_amortizacion(solicitud)
-        else:
-            amortizaciones = list(amortizaciones_db)
+        # También opcionalmente guardar el archivo temporalmente para descarga directa
+        import tempfile
+        import os
+        from django.conf import settings
+        
+        # Crear archivo temporal para descarga opcional
+        temp_filename = None
+        if hasattr(settings, 'MEDIA_ROOT'):
+            import uuid
+            temp_filename = f"temp_pdf_{uuid.uuid4().hex[:8]}.pdf"
+            temp_path = os.path.join(settings.MEDIA_ROOT, 'temp_pdfs', temp_filename)
+            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+            
+            with open(temp_path, 'wb') as f:
+                f.write(pdf_bytes)
+        
+        return Response({
+            "success": True,
+            "pdf_base64": pdf_base64,
+            "filename": f"Informe_Credito_{persona.NumeroIdentificacion[:10]}.pdf",
+            "file_size": len(pdf_bytes),
+            "file_size_mb": f"{(len(pdf_bytes) / 1024 / 1024):.2f}",
+            "temp_url": f"/media/temp_pdfs/{temp_filename}" if temp_filename else None,
+            "persona": {
+                "id": persona.IdPersona,
+                "nombre": f"{persona.Nombres} {persona.Apellidos}",
+                "identificacion": persona.NumeroIdentificacion
+            },
+            "solicitud": {
+                "numero": getattr(solicitud, 'NumeroSolicitud', 'N/A'),
+                "monto": float(getattr(solicitud, 'MontoSolicitado', 0)) if getattr(solicitud, 'MontoSolicitado', 0) else 0
+            },
+            "timestamp": datetime.now().isoformat(),
+            "format": "base64",
+            "instructions": {
+                "expo": "Usa expo-file-system para guardar el base64",
+                "web": "Usa atob() para decodificar el base64"
+            }
+        })
 
-        # Crear buffer para el PDF
+    def _respond_error(self, message, status_code, request=None):
+        """Manejo de errores unificado"""
+        if request and self._is_mobile_request(request):
+            return Response({
+                "success": False,
+                "error": message,
+                "timestamp": datetime.now().isoformat()
+            }, status=status_code)
+        else:
+            return Response({
+                "error": message
+            }, status=status_code)
+
+    def _is_mobile_request(self, request):
+        """Determina si es una solicitud móvil"""
+        user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+        is_mobile_app = 'expo' in user_agent or 'reactnative' in user_agent
+        is_mobile_param = request.query_params.get('mobile', 'false').lower() == 'true'
+        is_expo_header = request.META.get('HTTP_X_REQUESTED_WITH') == 'Expo'
+        
+        return is_mobile_app or is_mobile_param or is_expo_header
+
+    def _generar_pdf(self, persona, solicitud, amortizaciones):
+        """Genera el PDF y retorna los bytes"""
         buffer = BytesIO()
         
         # Configurar página A4
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib import colors
         width, height = A4
         
         p = canvas.Canvas(buffer, pagesize=A4)
         
         # ====================
-        # PORTADA - Formato profesional
+        # PORTADA
         # ====================
         p.setFont("Helvetica-Bold", 24)
         p.setFillColor(colors.HexColor('#1a365d'))
@@ -456,22 +559,12 @@ class ReporteCreditoPDFProfesional(APIView):
         p.drawString(50, y, "DATOS GENERALES DEL CRÉDITO")
         y -= 30
         
-        # Usar solo campos que existen en el modelo Solicitud
-        # Verificar qué campos tiene realmente el modelo
+        # Datos generales
         numero_solicitud = getattr(solicitud, 'NumeroSolicitud', 'N/A')
         
-        # Intentar obtener fecha de diferentes campos posibles
-        fecha_desembolso = "N/A"
-        if hasattr(solicitud, 'FechaSolicitud'):
-            fecha_desembolso = solicitud.FechaSolicitud.strftime('%d/%m/%Y') if solicitud.FechaSolicitud else "N/A"
-        elif hasattr(solicitud, 'fecha_solicitud'):
-            fecha_desembolso = solicitud.fecha_solicitud.strftime('%d/%m/%Y') if solicitud.fecha_solicitud else "N/A"
-        elif hasattr(solicitud, 'fecha'):
-            fecha_desembolso = solicitud.fecha.strftime('%d/%m/%Y') if solicitud.fecha else "N/A"
-        elif hasattr(solicitud, 'created_at'):
-            fecha_desembolso = solicitud.created_at.strftime('%d/%m/%Y') if solicitud.created_at else "N/A"
+        # Fecha
+        fecha_desembolso = self._obtener_fecha_solicitud(solicitud)
         
-        # Cuadro de datos generales - Solo campos que existen
         datos_generales = [
             ("Crédito Nº", numero_solicitud),
             ("Nombre del cliente", f"{persona.Nombres} {persona.Apellidos}"),
@@ -487,7 +580,7 @@ class ReporteCreditoPDFProfesional(APIView):
             p.drawString(70, y, f"{label}:")
             p.setFont("Helvetica", 10)
             p.setFillColor(colors.black)
-            p.drawString(200, y, str(value)[:40])  # Limitar longitud
+            p.drawString(200, y, str(value)[:40])
             y -= 20
         
         # ====================
@@ -499,31 +592,15 @@ class ReporteCreditoPDFProfesional(APIView):
         p.drawString(50, y, "CONDICIONES FINANCIERAS")
         y -= 30
         
-        # Calcular valores financieros usando solo campos existentes
+        # Calcular valores financieros
         monto = float(getattr(solicitud, 'MontoSolicitado', 0)) if getattr(solicitud, 'MontoSolicitado', 0) else 0
         plazo = getattr(solicitud, 'PlazoFinanciero', 0) if getattr(solicitud, 'PlazoFinanciero', 0) else 0
         tasa_anual = float(getattr(solicitud, 'TasaInteresAnual', 0)) if getattr(solicitud, 'TasaInteresAnual', 0) else 0
         
-        # Evitar división por cero
-        tasa_mensual = tasa_anual / 12 / 100 if tasa_anual > 0 else 0.01 / 12
+        # Calcular cuota
+        cuota_mensual, total_intereses, costo_total = self._calcular_cuota(monto, plazo, tasa_anual)
         
-        # Calcular pago mensual aproximado
-        if tasa_mensual > 0 and plazo > 0 and monto > 0:
-            try:
-                cuota = (monto * (tasa_mensual * (1 + tasa_mensual)**plazo)) / (((1 + tasa_mensual)**plazo) - 1)
-                cuota_mensual = round(cuota, 2)
-                total_intereses = (cuota_mensual * plazo) - monto
-                costo_total = cuota_mensual * plazo
-            except:
-                cuota_mensual = monto / plazo if plazo > 0 else 0
-                total_intereses = 0
-                costo_total = monto
-        else:
-            cuota_mensual = monto / plazo if plazo > 0 else 0
-            total_intereses = 0
-            costo_total = monto
-        
-        # Tabla de condiciones financieras - Solo campos que existen
+        # Tabla de condiciones
         condiciones = [
             ("Importe del préstamo", f"${monto:,.0f}" if monto > 0 else "$0"),
             ("Tasa de interés anual", f"{tasa_anual:.2f}%" if tasa_anual > 0 else "0.00%"),
@@ -549,71 +626,29 @@ class ReporteCreditoPDFProfesional(APIView):
             p.drawString(col_x + 130, row_y, str(value))
         
         # ====================
-        # TÉRMINOS DE LA OPERACIÓN DE CRÉDITO
-        # ====================
-        p.showPage()
-        
-        p.setFont("Helvetica-Bold", 16)
-        p.setFillColor(colors.HexColor('#1a365d'))
-        p.drawCentredString(width/2, height - 50, "TÉRMINOS DE LA OPERACIÓN DE CRÉDITO")
-        
-        y = height - 100
-        
-        # Cuadro de términos - Solo campos que existen
-        terminos = [
-            ("Crédito Nº", numero_solicitud),
-            ("Nombre del cliente", f"{persona.Nombres} {persona.Apellidos}"[:30]),
-            ("Número identificación", f"{getattr(persona, 'TipoIdentificacion', 'ID')}: {persona.NumeroIdentificacion}"[:30]),
-            ("Fecha desembolso", fecha_desembolso),
-            ("Tasa E.A", f"{tasa_anual:.2f}%" if tasa_anual > 0 else "0.00%"),
-            ("Tasa mora", "Máxima legal"),
-            ("Período pago", "01 mensual"),
-            ("Nº de Pagaré", numero_solicitud)
-        ]
-        
-        # Dibujar tabla de términos
-        for i, (label, value) in enumerate(terminos):
-            # Fondo alternado
-            if i % 2 == 0:
-                p.setFillColor(colors.HexColor('#f7fafc'))
-                p.rect(50, y - 15, width - 100, 25, fill=1, stroke=0)
-            
-            # Bordes
-            p.setStrokeColor(colors.HexColor('#e2e8f0'))
-            p.rect(50, y - 15, width - 100, 25)
-            
-            # Texto
-            p.setFillColor(colors.black)
-            p.setFont("Helvetica-Bold", 9)
-            p.drawString(60, y - 10, label)
-            p.setFont("Helvetica", 9)
-            p.drawString(250, y - 10, str(value))
-            
-            y -= 25
-        
-        # ====================
         # TABLA DE AMORTIZACIÓN
         # ====================
         if amortizaciones:
-            y -= 30
+            p.showPage()
+            
             p.setFont("Helvetica-Bold", 16)
             p.setFillColor(colors.HexColor('#1a365d'))
-            p.drawCentredString(width/2, y, "TABLA DE AMORTIZACIÓN")
-            y -= 40
+            p.drawCentredString(width/2, height - 50, "TABLA DE AMORTIZACIÓN")
             
-            # Encabezados de la tabla
-            headers = ["PERIODO", "FECHA", "CUOTA", "INTERÉS", "ABONO CAPITAL", "SALDO"]
-            col_widths = [60, 90, 80, 80, 100, 100]
+            y = height - 80
+            
+            # Encabezados
+            headers = ["MES", "FECHA", "CUOTA", "INTERÉS", "CAPITAL", "SALDO"]
+            col_widths = [50, 90, 80, 80, 100, 100]
             col_positions = [50]
             
             for i in range(1, len(col_widths)):
                 col_positions.append(col_positions[i-1] + col_widths[i-1])
             
-            # Fondo para encabezados
+            # Encabezados
             p.setFillColor(colors.HexColor('#2d3748'))
             p.rect(50, y - 20, width - 100, 25, fill=1, stroke=0)
             
-            # Texto de encabezados
             p.setFont("Helvetica-Bold", 8)
             p.setFillColor(colors.white)
             for i, header in enumerate(headers):
@@ -621,11 +656,10 @@ class ReporteCreditoPDFProfesional(APIView):
             
             y -= 35
             
-            # Datos de la tabla (primeros 25 periodos)
+            # Datos
             p.setFont("Helvetica", 8)
             
-            for i, amort in enumerate(amortizaciones[:25]):  # Mostrar primeros 25 periodos
-                # Si nos quedamos sin espacio, nueva página
+            for i, amort in enumerate(amortizaciones[:30]):
                 if y < 50:
                     p.showPage()
                     y = height - 50
@@ -646,112 +680,105 @@ class ReporteCreditoPDFProfesional(APIView):
                 else:
                     p.setFillColor(colors.white)
                 
-                # Fondo de fila
                 p.rect(50, y - 15, width - 100, 20, fill=1, stroke=0)
                 
-                # Extraer valores de forma segura
-                try:
-                    if isinstance(amort, dict):
-                        mes = amort.get('Mes', i + 1)
-                        cuota = amort.get('Cuota', 0)
-                        capital = amort.get('Capital', 0)
-                        interes = amort.get('Interes', 0)
-                        saldo = amort.get('CapitalVivo', 0)
-                    else:
-                        mes = amort.Mes if hasattr(amort, 'Mes') and amort.Mes else i + 1
-                        cuota = amort.Cuota if hasattr(amort, 'Cuota') else 0
-                        capital = amort.Capital if hasattr(amort, 'Capital') else 0
-                        interes = amort.Interes if hasattr(amort, 'Interes') else 0
-                        saldo = amort.CapitalVivo if hasattr(amort, 'CapitalVivo') else 0
-                except:
-                    mes = i + 1
-                    cuota = capital = interes = saldo = 0
+                # Extraer valores
+                mes, cuota_val, interes_val, capital_val, saldo_val = self._extraer_valores_amortizacion(amort, i)
                 
-                # Calcular fecha aproximada usando la fecha actual
-                fecha_actual = datetime.now()
-                fecha_cuota = fecha_actual.replace(day=3)  # Siempre día 3 del mes
+                # Fecha aproximada
+                fecha_cuota = datetime.now().replace(day=3)
                 
-                # Texto de la fila
+                # Texto
                 p.setFillColor(colors.black)
                 p.drawString(col_positions[0] + 5, y - 10, str(mes))
                 p.drawString(col_positions[1] + 5, y - 10, fecha_cuota.strftime('%d/%m/%Y'))
-                
-                # Formatear valores monetarios
-                try:
-                    cuota_val = float(cuota) if cuota else 0
-                    interes_val = float(interes) if interes else 0
-                    capital_val = float(capital) if capital else 0
-                    saldo_val = float(saldo) if saldo else 0
-                    
-                    p.drawString(col_positions[2] + 5, y - 10, f"${cuota_val:,.0f}")
-                    p.drawString(col_positions[3] + 5, y - 10, f"${interes_val:,.0f}")
-                    p.drawString(col_positions[4] + 5, y - 10, f"${capital_val:,.0f}")
-                    p.drawString(col_positions[5] + 5, y - 10, f"${saldo_val:,.0f}")
-                except:
-                    p.drawString(col_positions[2] + 5, y - 10, "$0")
-                    p.drawString(col_positions[3] + 5, y - 10, "$0")
-                    p.drawString(col_positions[4] + 5, y - 10, "$0")
-                    p.drawString(col_positions[5] + 5, y - 10, "$0")
+                p.drawString(col_positions[2] + 5, y - 10, f"${cuota_val:,.0f}")
+                p.drawString(col_positions[3] + 5, y - 10, f"${interes_val:,.0f}")
+                p.drawString(col_positions[4] + 5, y - 10, f"${capital_val:,.0f}")
+                p.drawString(col_positions[5] + 5, y - 10, f"${saldo_val:,.0f}")
                 
                 y -= 25
         else:
-            # Si no hay amortizaciones
-            y -= 30
+            # Sin amortizaciones
+            p.showPage()
             p.setFont("Helvetica-Bold", 14)
             p.setFillColor(colors.red)
-            p.drawString(50, y, "NO HAY DATOS DE AMORTIZACIÓN DISPONIBLES")
-            y -= 30
-        
-        # ====================
-        # OBSERVACIONES FINALES
-        # ====================
-        p.showPage()
-        
-        p.setFont("Helvetica-Bold", 14)
-        p.setFillColor(colors.HexColor('#1a365d'))
-        p.drawString(50, height - 100, "OBSERVACIONES")
-        
-        y = height - 130
-        
-        observaciones = [
-            "• El crédito se encuentra bajo un esquema de amortización decreciente de intereses.",
-            "• La cuota mensual se mantiene constante durante el periodo mostrado.",
-            "• Se recomienda verificar la tasa de interés nominal mensual con la entidad financiera.",
-            "• Este documento es generado con fines informativos.",
-            "• Valide toda la información con su oficina bancaria correspondiente.",
-        ]
-        
-        p.setFont("Helvetica", 10)
-        p.setFillColor(colors.black)
-        for obs in observaciones:
-            p.drawString(70, y, obs)
-            y -= 20
+            p.drawCentredString(width/2, height/2, "NO HAY DATOS DE AMORTIZACIÓN DISPONIBLES")
         
         # Pie de página final
-        y = 50
-        p.setFont("Helvetica", 9)
+        p.showPage()
+        p.setFont("Helvetica", 10)
         p.setFillColor(colors.HexColor('#6b7280'))
-        p.drawCentredString(width/2, y, "Banco Financiero S.A. - Más banco. Más amigo.")
-        p.setFont("Helvetica", 8)
-        p.drawCentredString(width/2, y - 15, f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-        p.drawCentredString(width/2, y - 30, "Documento informativo. Valide los datos con su oficina correspondiente.")
+        p.drawCentredString(width/2, 50, f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        p.drawCentredString(width/2, 35, "Banco Financiero S.A. - Más banco. Más amigo.")
         
-        # Guardar el PDF
+        # Guardar PDF
         p.save()
         
-        # Obtener el PDF del buffer
+        # Obtener bytes
         buffer.seek(0)
-        pdf = buffer.getvalue()
+        pdf_bytes = buffer.getvalue()
         buffer.close()
         
-        # Crear respuesta HTTP
-        response = HttpResponse(pdf, content_type='application/pdf')
-        nombre_archivo = f"Informe_Credito_{persona.NumeroIdentificacion[:10]}.pdf"
-        response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
-        
-        return response
+        return pdf_bytes
+
+    # ========== MÉTODOS AUXILIARES ==========
     
-    def calcular_amortizacion(self, solicitud):
+    def _obtener_fecha_solicitud(self, solicitud):
+        """Obtiene la fecha de la solicitud de diferentes campos posibles"""
+        for attr in ['FechaSolicitud', 'fecha_solicitud', 'fecha', 'created_at', 'FechaCreacion']:
+            if hasattr(solicitud, attr):
+                value = getattr(solicitud, attr)
+                if value:
+                    return value.strftime('%d/%m/%Y')
+        return "N/A"
+
+    def _calcular_cuota(self, monto, plazo, tasa_anual):
+        """Calcula la cuota mensual"""
+        if monto > 0 and plazo > 0 and tasa_anual > 0:
+            tasa_mensual = tasa_anual / 12 / 100
+            try:
+                cuota = (monto * (tasa_mensual * (1 + tasa_mensual)**plazo)) / (((1 + tasa_mensual)**plazo) - 1)
+                cuota_mensual = round(cuota, 2)
+                total_intereses = (cuota_mensual * plazo) - monto
+                costo_total = cuota_mensual * plazo
+                return cuota_mensual, total_intereses, costo_total
+            except:
+                cuota_mensual = monto / plazo if plazo > 0 else 0
+                return cuota_mensual, 0, monto
+        else:
+            cuota_mensual = monto / plazo if plazo > 0 else 0
+            return cuota_mensual, 0, monto
+
+    def _extraer_valores_amortizacion(self, amort, index):
+        """Extrae valores de la amortización de forma segura"""
+        try:
+            if isinstance(amort, dict):
+                mes = amort.get('Mes', index + 1)
+                cuota = amort.get('Cuota', 0)
+                capital = amort.get('Capital', 0)
+                interes = amort.get('Interes', 0)
+                saldo = amort.get('CapitalVivo', 0) or amort.get('Saldo', 0)
+            else:
+                mes = amort.Mes if hasattr(amort, 'Mes') and amort.Mes else index + 1
+                cuota = amort.Cuota if hasattr(amort, 'Cuota') else 0
+                capital = amort.Capital if hasattr(amort, 'Capital') else 0
+                interes = amort.Interes if hasattr(amort, 'Interes') else 0
+                saldo = amort.CapitalVivo if hasattr(amort, 'CapitalVivo') else (
+                    amort.Saldo if hasattr(amort, 'Saldo') else 0
+                )
+        except:
+            mes = index + 1
+            cuota = capital = interes = saldo = 0
+        
+        cuota_val = float(cuota) if cuota else 0
+        interes_val = float(interes) if interes else 0
+        capital_val = float(capital) if capital else 0
+        saldo_val = float(saldo) if saldo else 0
+        
+        return mes, cuota_val, interes_val, capital_val, saldo_val
+
+    def _calcular_amortizacion(self, solicitud):
         """Calcular tabla de amortización si no existe en BD"""
         try:
             P = float(getattr(solicitud, 'MontoSolicitado', 0)) if getattr(solicitud, 'MontoSolicitado', 0) else 0
@@ -773,7 +800,7 @@ class ReporteCreditoPDFProfesional(APIView):
             saldo = P
             tabla = []
             
-            for mes in range(1, n + 1):
+            for mes in range(1, min(n, 360) + 1):
                 interes = round(saldo * r, 2)
                 capital = round(cuota - interes, 2)
                 saldo = round(saldo - capital, 2)

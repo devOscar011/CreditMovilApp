@@ -11,28 +11,27 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+from datetime import timedelta
 
-# Build paths inside the proj   ect like this: BASE_DIR / 'subdir'.
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# SECURITY: Load from environment variables
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-CHANGE-THIS-IN-PRODUCTION')
+DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-l2d2mirs*%mcm3blzr#n0x(el(ws-*&*!p0n$oz!^pio&u^_ex'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ["*", "granitelike-superambitiously-kaitlin.ngrok-free.dev"]
-
-CSRF_TRUSTED_ORIGINS = [
-    "https://*.ngrok-free.dev",
-]
-
-
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS Configuration
+CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8000').split(',')
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
 
 
 # Application definition
@@ -51,6 +50,8 @@ INSTALLED_APPS = [
     'django_extensions',
 ]
 
+
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.coreapi.AutoSchema",
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -61,11 +62,9 @@ REST_FRAMEWORK = {
     ),
 }
 
-from datetime import timedelta
-
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get('ACCESS_TOKEN_LIFETIME', '60'))),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get('REFRESH_TOKEN_LIFETIME', '1'))),
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": True,
 }
@@ -104,32 +103,42 @@ WSGI_APPLICATION = 'crediticia.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+# By default use SQLite when DEBUG=True for zero-config local development.
+# If you want to use PostgreSQL locally, set the environment variable
+# `USE_POSTGRES=1` (or 'true') before running Django; production should
+# use proper env vars and DEBUG=False.
+USE_POSTGRES = os.environ.get('USE_POSTGRES', '0').lower() in ('1', 'true', 'yes')
 
-#DATABASES = {
- #    'default': {
- #        'ENGINE': 'mssql',
- #       'NAME': 'validacionDB',
-#       'USER': 'MarlonUser',  # usuario de la base de datos
- #        'PASSWORD': '1234',
-  #       'HOST': 'DESKTOP-6VP4C5M',
-  #       'PORT': '',
-  #       'OPTIONS': {
-  #           'driver': 'ODBC Driver 17 for SQL Server',
-  #       },
-  #   }
-#}
-
-DATABASES = {
-   'default': {
-       'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'CrediticiaDB', 
-        'USER': 'postgresUser',  
-       'PASSWORD': 'MAUD2023',
-       'HOST': 'localhost',  
-       'PORT': '5432',      
+if USE_POSTGRES:
+    DATABASES = {
+       'default': {
+           'ENGINE': 'django.db.backends.postgresql',
+           'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
+           'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+           'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
+           'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+           'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+       }
     }
-}
+else:
+    if DEBUG:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
+    else:
+        DATABASES = {
+           'default': {
+               'ENGINE': 'django.db.backends.postgresql',
+               'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
+               'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+               'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
+               'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+               'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+           }
+        }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -153,9 +162,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = os.environ.get('LANGUAGE_CODE', 'es-es')
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = os.environ.get('TIME_ZONE', 'America/Bogota')
 
 USE_I18N = True
 
@@ -165,9 +174,39 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Security Settings for Production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() in ('true', '1', 'yes')
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
+    CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_SECURITY_POLICY = {
+        'DEFAULT_SRC': ("'self'",),
+        'SCRIPT_SRC': ("'self'", "'unsafe-inline'", "'unsafe-eval'"),
+        'STYLE_SRC': ("'self'", "'unsafe-inline'"),
+        'IMG_SRC': ("'self'", "data:", "https:"),
+    }
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    
+# Email Configuration
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() in ('true', '1', 'yes')
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@creditapi.com')

@@ -1,0 +1,38 @@
+{
+  "name": "creditapi",
+  "version": "1.0.0",
+  "description": "Sistema de Validación de Créditos con Cálculos Financieros",
+  "main": "validacion/calculos.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:verbose": "jest --verbose",
+    "test:ci": "jest --ci --coverage"
+  },
+  "keywords": [
+    "creditos",
+    "financiero",
+    "amortizacion"
+  ],
+  "author": "CreditApi Team",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "dependencies": {
+    "decimal.js": "^10.4.3"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "validacion/**/*.js",
+      "!validacion/tests/**"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.js",
+      "**/?(*.)+(spec|test).js"
+    ],
+    "verbose": true
+  }
+}

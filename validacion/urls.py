@@ -37,7 +37,7 @@ urlpatterns = [
     path('api/pruebas-estres/', PruebasDeEstresAPIView.as_view(), name='pruebas-estres'),
     path('api/ltv/<int:id_persona>/', CalcularLTVAPIView.as_view(), name='calcular-ltv'),
     #path('reporte-credito/<int:persona_id>/', ReporteCreditoPDF.as_view(), name='reporte_credito_pdf'),
-    path('reporte-credito-profesional/<int:persona_id>/', ReporteCreditoPDFProfesional.as_view(), name='reporte-profesional'),
+    path('reporte-credito-pdf/<int:persona_id>/', ReporteCreditoPDFProfesional.as_view(), name='reporte-profesional'),
     
 ]
     
