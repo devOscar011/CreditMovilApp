@@ -27,10 +27,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY: Load from environment variables
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-CHANGE-THIS-IN-PRODUCTION')
 DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = [host.strip() for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8000').split(',')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8000').split(',') if origin.strip()]
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
 
 
