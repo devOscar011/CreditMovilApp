@@ -14,3 +14,4 @@ coverage==7.14.0
 pytest>=9.0.0
 pytest-cov>=5.0.0
 pytest-django>=4.7.0
+dj-database-url>=1.0.0

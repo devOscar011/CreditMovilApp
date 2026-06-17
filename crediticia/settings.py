@@ -103,32 +103,51 @@ WSGI_APPLICATION = 'crediticia.wsgi.application'
 
 
 # Database
-# By default use SQLite when DEBUG=True for zero-config local development.
-# If you want to use PostgreSQL locally, set the environment variable
-# `USE_POSTGRES=1` (or 'true') before running Django; production should
-# use proper env vars and DEBUG=False.
-USE_POSTGRES = os.environ.get('USE_POSTGRES', '0').lower() in ('1', 'true', 'yes')
-
-if USE_POSTGRES:
-    DATABASES = {
-       'default': {
-           'ENGINE': 'django.db.backends.postgresql',
-           'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
-           'USER': os.environ.get('POSTGRES_USER', 'postgres'),
-           'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
-           'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
-           'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-       }
-    }
-else:
-    if DEBUG:
+# Prefer DATABASE_URL (Railway provides) and fall back to env vars or SQLite
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    try:
+        import dj_database_url
+        conn_max_age = int(os.environ.get('CONN_MAX_AGE', 600))
         DATABASES = {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
+            'default': dj_database_url.parse(DATABASE_URL, conn_max_age=conn_max_age)
         }
-    else:
+    except Exception:
+        # If dj_database_url is not available, fall back to explicit env vars
+        USE_POSTGRES = os.environ.get('USE_POSTGRES', '0').lower() in ('1', 'true', 'yes')
+        if USE_POSTGRES:
+            DATABASES = {
+               'default': {
+                   'ENGINE': 'django.db.backends.postgresql',
+                   'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
+                   'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+                   'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
+                   'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+                   'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+               }
+            }
+        else:
+            if DEBUG:
+                DATABASES = {
+                    'default': {
+                        'ENGINE': 'django.db.backends.sqlite3',
+                        'NAME': BASE_DIR / 'db.sqlite3',
+                    }
+                }
+            else:
+                DATABASES = {
+                   'default': {
+                       'ENGINE': 'django.db.backends.postgresql',
+                       'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
+                       'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+                       'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
+                       'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+                       'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+                   }
+                }
+else:
+    USE_POSTGRES = os.environ.get('USE_POSTGRES', '0').lower() in ('1', 'true', 'yes')
+    if USE_POSTGRES:
         DATABASES = {
            'default': {
                'ENGINE': 'django.db.backends.postgresql',
@@ -139,6 +158,25 @@ else:
                'PORT': os.environ.get('POSTGRES_PORT', '5432'),
            }
         }
+    else:
+        if DEBUG:
+            DATABASES = {
+                'default': {
+                    'ENGINE': 'django.db.backends.sqlite3',
+                    'NAME': BASE_DIR / 'db.sqlite3',
+                }
+            }
+        else:
+            DATABASES = {
+               'default': {
+                   'ENGINE': 'django.db.backends.postgresql',
+                   'NAME': os.environ.get('POSTGRES_DB', 'CrediticiaDB'),
+                   'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+                   'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'root'),
+                   'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+                   'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+               }
+            }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
