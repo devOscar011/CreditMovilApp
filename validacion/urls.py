@@ -32,6 +32,7 @@ urlpatterns = [
     path('amortizacion/calculada/persona/<int:persona_id>/', TablaAmortizacionCalculada.as_view(), name='amortizacion_calculada'),
     path('evaluar-capacidad-pago/persona/<int:persona_id>/', EvaluarCapacidadPagoAPIView.as_view(), name='evaluar_capacidad_pago'),
     path('analizar-flujo-caja/persona/<int:persona_id>/', AnalizarFlujoDeCajaAPIView.as_view(), name='analizar_flujo_caja'),
+    path('calcular-indice-endeudamiento/persona/<int:persona_id>/', CalcularIndiceEndeudamiento.as_view(), name='calcular_indice_endeudamiento'),
     path('cacular-indice-endeudamineto/persona/<int:persona_id>/', CalcularIndiceEndeudamiento.as_view(), name='calcular_indice_endeudamiento'),
     path('api/analizar-sensibilidad/', AnalizarSensibilidadAPIView.as_view(), name='analizar-sensibilidad'),
     path('api/pruebas-estres/', PruebasDeEstresAPIView.as_view(), name='pruebas-estres'),

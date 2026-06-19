@@ -1,6 +1,7 @@
 from datetime import datetime
 from io import BytesIO
 import base64
+from decimal import Decimal
 
 from django.db import connection
 from django.http import HttpResponse
@@ -263,15 +264,38 @@ class CalcularIndiceEndeudamiento(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
 
     def get(self, request, persona_id):
-        query = "SELECT * FROM CalcularIndiceEndeudamiento(%s);"
-        with connection.cursor() as cursor:
-            cursor.execute(query, [persona_id])
-            row = cursor.fetchone()
+        try:
+            persona = Persona.objects.get(pk=persona_id)
+        except Persona.DoesNotExist:
+            return Response({"detail": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not row:
-            return Response({"detail": "No se encontraron datos"}, status=status.HTTP_404_NOT_FOUND)
+        laborales = Laboral.objects.filter(IdPersona=persona)
+        gastos_mensuales = GastosMensuales.objects.filter(IdPersona=persona)
 
-        persona_id, ingresos, gastos, indice, evaluacion_bd = row
+        if not laborales.exists() and not gastos_mensuales.exists():
+            return Response({"detail": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
+
+        ingresos = sum((laboral.IngresosMensuales for laboral in laborales), Decimal("0"))
+        deudas = sum((laboral.MontoDeudas for laboral in laborales), Decimal("0"))
+        gastos = sum(
+            (
+                gasto.Alimentacion
+                + gasto.VestimentaCalzado
+                + gasto.Transporte
+                + gasto.Colegiatura
+                + gasto.OtrosGastos
+                + gasto.GastosSalud
+                + gasto.Telecomunicaciones
+                + gasto.ServiciosAguaLuz
+                + gasto.ServiciosCableInternet
+                for gasto in gastos_mensuales
+            ),
+            Decimal("0"),
+        )
+
+        indice = None
+        if ingresos > 0:
+            indice = (gastos + deudas) / ingresos
 
         if indice is not None:
             if indice <= 0.20:
@@ -286,7 +310,7 @@ class CalcularIndiceEndeudamiento(APIView):
             evaluacion = "Datos insuficientes"
 
         return Response({
-            "PersonaId": persona_id,
+            "PersonaId": persona.id,
             "IngresoMensual": float(ingresos),
             "GastosMensuales": float(gastos),
             "IndiceEndeudamiento": float(indice) if indice is not None else None,
