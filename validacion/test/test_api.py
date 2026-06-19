@@ -1,4 +1,4 @@
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 from validacion.models import (Conyuge, Domicilio, GastosMensuales, Laboral,
@@ -8,6 +8,8 @@ from validacion.models import (Conyuge, Domicilio, GastosMensuales, Laboral,
 class BaseAPITest(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="testuser", password="testpass123")
+        self.group, _ = Group.objects.get_or_create(name="Promotor")
+        self.user.groups.add(self.group)
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 

@@ -1,5 +1,4 @@
 from datetime import datetime
-from email.headerregistry import Group
 from io import BytesIO
 import base64
 
@@ -21,7 +20,6 @@ from reportlab.platypus import (
     TableStyle, Image, PageBreak, KeepTogether
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from django.db import connection
 from django.contrib.auth.models import User, Group 
 
 from .models import (

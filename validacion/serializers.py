@@ -1,5 +1,7 @@
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 from django.contrib.auth.models import Group
 
 
@@ -73,6 +75,23 @@ class PersonaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Persona
         fields = '__all__'
+
+    def validate_NumeroIdentificacion(self, value):
+        if isinstance(value, str):
+            normalized = value.strip().replace(' ', '')
+            return normalized
+        return value
+
+    def validate(self, attrs):
+        tipo = attrs.get('TipoIdentificacion')
+        if isinstance(tipo, str):
+            attrs['TipoIdentificacion'] = tipo.strip().upper()
+
+        nid = attrs.get('NumeroIdentificacion')
+        if isinstance(nid, str):
+            attrs['NumeroIdentificacion'] = nid.strip().replace(' ', '')
+
+        return attrs
 
 # Serializador para Laboral
 class LaboralSerializer(serializers.ModelSerializer):
