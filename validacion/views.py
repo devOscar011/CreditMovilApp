@@ -1,7 +1,7 @@
 from datetime import datetime
 from io import BytesIO
 import base64
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db import connection
 from django.http import HttpResponse
@@ -205,36 +205,123 @@ class ReferenciaPersonalViewSet(viewsets.ModelViewSet):
 #        FUNCIONES FINANCIERAS (Views protegidas)
 # -----------------------------------------------------
 
+def _sumar_gastos_mensuales(gastos_mensuales):
+    return sum(
+        (
+            gasto.Alimentacion
+            + gasto.VestimentaCalzado
+            + gasto.Transporte
+            + gasto.Colegiatura
+            + gasto.OtrosGastos
+            + gasto.GastosSalud
+            + gasto.Telecomunicaciones
+            + gasto.ServiciosAguaLuz
+            + gasto.ServiciosCableInternet
+            for gasto in gastos_mensuales
+        ),
+        Decimal("0"),
+    )
+
+
+def _calcular_cuota_decimal(monto, plazo, tasa_anual):
+    monto = Decimal(monto or 0)
+    plazo = int(plazo or 0)
+    tasa_anual = Decimal(tasa_anual or 0)
+
+    if monto <= 0 or plazo <= 0:
+        return Decimal("0")
+
+    tasa_mensual = (tasa_anual / Decimal("100")) / Decimal("12")
+    if tasa_mensual <= 0:
+        return (monto / Decimal(plazo)).quantize(Decimal("0.01"))
+
+    factor = (Decimal("1") + tasa_mensual) ** plazo
+    return ((monto * tasa_mensual * factor) / (factor - Decimal("1"))).quantize(Decimal("0.01"))
+
+
+def _evaluar_credito(flujo_caja_libre, cuota_mensual):
+    if cuota_mensual <= 0:
+        return None, "Sin solicitud activa"
+
+    dscr = (flujo_caja_libre / cuota_mensual).quantize(Decimal("0.01"))
+    if dscr >= Decimal("1.25"):
+        estado = "APROBADO"
+    elif dscr >= Decimal("1.00"):
+        estado = "EN_REVISION"
+    else:
+        estado = "RECHAZADO"
+
+    return dscr, estado
+
+
+def _parse_decimal_request(value, field_name):
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"{field_name} debe ser numerico")
+
+
+def _obtener_datos_financieros(persona_id):
+    try:
+        persona = Persona.objects.get(pk=persona_id)
+    except Persona.DoesNotExist:
+        return None
+
+    laborales = Laboral.objects.filter(IdPersona=persona)
+    gastos_mensuales = GastosMensuales.objects.filter(IdPersona=persona)
+    solicitud = Solicitud.objects.filter(IdPersona=persona).order_by("-IdSolicitud").first()
+
+    if not laborales.exists() and not gastos_mensuales.exists() and not solicitud:
+        return {"persona": persona, "sin_datos": True}
+
+    ingresos = sum((laboral.IngresosMensuales for laboral in laborales), Decimal("0"))
+    deudas = sum((laboral.MontoDeudas for laboral in laborales), Decimal("0"))
+    garantia = sum((laboral.MontoGarantia for laboral in laborales), Decimal("0"))
+    gastos = _sumar_gastos_mensuales(gastos_mensuales)
+    flujo_caja_libre = ingresos - gastos - deudas
+
+    monto_prestamo = solicitud.MontoSolicitado if solicitud else Decimal("0")
+    plazo = solicitud.PlazoFinanciero if solicitud else 0
+    tasa = solicitud.TasaInteresAnual if solicitud else Decimal("0")
+    cuota_mensual = _calcular_cuota_decimal(monto_prestamo, plazo, tasa)
+    dscr, estado_credito = _evaluar_credito(flujo_caja_libre, cuota_mensual)
+
+    return {
+        "persona": persona,
+        "sin_datos": False,
+        "solicitud": solicitud,
+        "ingresos": ingresos,
+        "gastos": gastos,
+        "deudas": deudas,
+        "garantia": garantia,
+        "flujo": flujo_caja_libre,
+        "monto_prestamo": monto_prestamo,
+        "plazo": plazo,
+        "tasa": tasa,
+        "cuota": cuota_mensual,
+        "dscr": dscr,
+        "estado_credito": estado_credito,
+    }
+
+
 class EvaluarCapacidadPagoAPIView(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
 
     def get(self, request, persona_id):
-        query = "SELECT * FROM EvaluarCapacidadPagoReal(%s);"
-        with connection.cursor() as cursor:
-            cursor.execute(query, [persona_id])
-            row = cursor.fetchone()
-
-        if not row:
-            return Response({"detail": "No se encontraron datos"}, status=status.HTTP_404_NOT_FOUND)
-
-        (
-            persona_id,
-            ingreso_total,
-            gastos_totales,
-            flujo_caja_libre,
-            cuota_mensual,
-            dscr,
-            estado_credito
-        ) = row
+        datos = _obtener_datos_financieros(persona_id)
+        if datos is None:
+            return Response({"detail": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+        if datos["sin_datos"]:
+            return Response({"detail": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
         return Response({
-            "PersonaId": persona_id,
-            "IngresosMensualesTotales": float(ingreso_total),
-            "GastosMensualesTotales": float(gastos_totales),
-            "FlujoCajaLibre": float(flujo_caja_libre),
-            "CuotaMensual": float(cuota_mensual),
-            "DSCR": float(dscr) if dscr is not None else None,
-            "EstadoCredito": estado_credito
+            "PersonaId": datos["persona"].id,
+            "IngresosMensualesTotales": float(datos["ingresos"]),
+            "GastosMensualesTotales": float(datos["gastos"]),
+            "FlujoCajaLibre": float(datos["flujo"]),
+            "CuotaMensual": float(datos["cuota"]),
+            "DSCR": float(datos["dscr"]) if datos["dscr"] is not None else None,
+            "EstadoCredito": datos["estado_credito"]
         })
 
 
@@ -242,21 +329,17 @@ class AnalizarFlujoDeCajaAPIView(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
 
     def get(self, request, persona_id):
-        query = "SELECT * FROM AnalizarFlujoDeCaja(%s);"
-        with connection.cursor() as cursor:
-            cursor.execute(query, [persona_id])
-            row = cursor.fetchone()
-
-        if not row:
-            return Response({"detail": "No se encontraron datos"}, status=status.HTTP_404_NOT_FOUND)
-
-        persona_id, ingreso, gastos, flujo = row
+        datos = _obtener_datos_financieros(persona_id)
+        if datos is None:
+            return Response({"detail": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+        if datos["sin_datos"]:
+            return Response({"detail": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
         return Response({
-            "PersonaId": persona_id,
-            "IngresoMensual": float(ingreso),
-            "GastosMensuales": float(gastos),
-            "FlujoCajaLibre": float(flujo)
+            "PersonaId": datos["persona"].id,
+            "IngresoMensual": float(datos["ingresos"]),
+            "GastosMensuales": float(datos["gastos"]),
+            "FlujoCajaLibre": float(datos["flujo"])
         })
 
 
@@ -264,34 +347,15 @@ class CalcularIndiceEndeudamiento(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
 
     def get(self, request, persona_id):
-        try:
-            persona = Persona.objects.get(pk=persona_id)
-        except Persona.DoesNotExist:
+        datos = _obtener_datos_financieros(persona_id)
+        if datos is None:
             return Response({"detail": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
-
-        laborales = Laboral.objects.filter(IdPersona=persona)
-        gastos_mensuales = GastosMensuales.objects.filter(IdPersona=persona)
-
-        if not laborales.exists() and not gastos_mensuales.exists():
+        if datos["sin_datos"]:
             return Response({"detail": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
-        ingresos = sum((laboral.IngresosMensuales for laboral in laborales), Decimal("0"))
-        deudas = sum((laboral.MontoDeudas for laboral in laborales), Decimal("0"))
-        gastos = sum(
-            (
-                gasto.Alimentacion
-                + gasto.VestimentaCalzado
-                + gasto.Transporte
-                + gasto.Colegiatura
-                + gasto.OtrosGastos
-                + gasto.GastosSalud
-                + gasto.Telecomunicaciones
-                + gasto.ServiciosAguaLuz
-                + gasto.ServiciosCableInternet
-                for gasto in gastos_mensuales
-            ),
-            Decimal("0"),
-        )
+        ingresos = datos["ingresos"]
+        gastos = datos["gastos"]
+        deudas = datos["deudas"]
 
         indice = None
         if ingresos > 0:
@@ -310,7 +374,7 @@ class CalcularIndiceEndeudamiento(APIView):
             evaluacion = "Datos insuficientes"
 
         return Response({
-            "PersonaId": persona.id,
+            "PersonaId": datos["persona"].id,
             "IngresoMensual": float(ingresos),
             "GastosMensuales": float(gastos),
             "IndiceEndeudamiento": float(indice) if indice is not None else None,
@@ -322,20 +386,28 @@ class CalcularLTVAPIView(APIView):
     permission_classes = [IsAuthenticated, GroupPermission]
 
     def get(self, request, id_persona):
-        query = """SELECT MontoPrestamo, MontoGarantia, LTV, Interpretacion 
-                   FROM CalcularLTV(%s);"""
-        with connection.cursor() as cursor:
-            cursor.execute(query, [id_persona])
-            row = cursor.fetchone()
+        datos = _obtener_datos_financieros(id_persona)
+        if datos is None:
+            return Response({"error": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+        if datos["sin_datos"]:
+            return Response({"error": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not row:
-            return Response({"error": "No se encontraron datos"}, status=status.HTTP_404_NOT_FOUND)
+        ltv = None
+        interpretacion = "Datos insuficientes"
+        if datos["garantia"] > 0:
+            ltv = ((datos["monto_prestamo"] / datos["garantia"]) * Decimal("100")).quantize(Decimal("0.01"))
+            if ltv <= Decimal("70"):
+                interpretacion = "Bajo riesgo: garantia suficiente"
+            elif ltv <= Decimal("85"):
+                interpretacion = "Riesgo moderado: relacion prestamo-garantia aceptable"
+            else:
+                interpretacion = "Alto riesgo: garantia insuficiente"
 
         return Response({
-            "MontoPrestamo": float(row[0]) if row[0] else None,
-            "MontoGarantia": float(row[1]) if row[1] else None,
-            "LTV": float(row[2]) if row[2] else None,
-            "Interpretacion": row[3],
+            "MontoPrestamo": float(datos["monto_prestamo"]) if datos["monto_prestamo"] else None,
+            "MontoGarantia": float(datos["garantia"]) if datos["garantia"] else None,
+            "LTV": float(ltv) if ltv is not None else None,
+            "Interpretacion": interpretacion,
         })
 
 
@@ -349,15 +421,32 @@ class AnalizarSensibilidadAPIView(APIView):
         if id_persona is None or variacion is None:
             return Response({"error": "Datos faltantes"}, status=status.HTTP_400_BAD_REQUEST)
 
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT * FROM AnalizarSensibilidad(%s, %s)", [id_persona, variacion])
-            columns = [col[0] for col in cursor.description]
-            row = cursor.fetchone()
+        datos = _obtener_datos_financieros(id_persona)
+        if datos is None:
+            return Response({"error": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+        if datos["sin_datos"]:
+            return Response({"error": "Sin datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not row:
-            return Response({"error": "Sin datos"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            variacion = _parse_decimal_request(variacion, "variacion_escenario")
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        ingreso_proyectado = datos["ingresos"] * (Decimal("1") + (variacion / Decimal("100")))
+        flujo_proyectado = ingreso_proyectado - datos["gastos"] - datos["deudas"]
+        dscr, estado_credito = _evaluar_credito(flujo_proyectado, datos["cuota"])
 
-        return Response(dict(zip(columns, row)))
+        return Response({
+            "PersonaId": datos["persona"].id,
+            "VariacionEscenario": float(variacion),
+            "IngresoBase": float(datos["ingresos"]),
+            "IngresoProyectado": float(ingreso_proyectado.quantize(Decimal("0.01"))),
+            "GastosMensuales": float(datos["gastos"]),
+            "DeudasMensuales": float(datos["deudas"]),
+            "FlujoCajaLibre": float(flujo_proyectado.quantize(Decimal("0.01"))),
+            "CuotaMensual": float(datos["cuota"]),
+            "DSCR": float(dscr) if dscr is not None else None,
+            "EstadoCredito": estado_credito,
+        })
 
 
 class PruebasDeEstresAPIView(APIView):
@@ -372,17 +461,40 @@ class PruebasDeEstresAPIView(APIView):
         if None in (id_persona, r_ingresos, i_gastos, i_tasa):
             return Response({"error": "Datos incompletos"}, status=status.HTTP_400_BAD_REQUEST)
 
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM PruebasDeEstres(%s, %s, %s, %s)
-            """, [id_persona, r_ingresos, i_gastos, i_tasa])
-            columns = [col[0] for col in cursor.description]
-            row = cursor.fetchone()
+        datos = _obtener_datos_financieros(id_persona)
+        if datos is None:
+            return Response({"error": "Persona no encontrada"}, status=status.HTTP_404_NOT_FOUND)
+        if datos["sin_datos"]:
+            return Response({"error": "No se encontraron datos financieros"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not row:
-            return Response({"error": "No se encontraron resultados"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            reduccion_ingresos = _parse_decimal_request(r_ingresos, "reduccion_ingresos")
+            incremento_gastos = _parse_decimal_request(i_gastos, "incremento_gastos")
+            incremento_tasa = _parse_decimal_request(i_tasa, "incremento_tasa_interes")
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(dict(zip(columns, row)))
+        ingreso_estresado = datos["ingresos"] * (Decimal("1") - (reduccion_ingresos / Decimal("100")))
+        gastos_estresados = datos["gastos"] * (Decimal("1") + (incremento_gastos / Decimal("100")))
+        tasa_estresada = datos["tasa"] + incremento_tasa
+        cuota_estresada = _calcular_cuota_decimal(datos["monto_prestamo"], datos["plazo"], tasa_estresada)
+        flujo_estresado = ingreso_estresado - gastos_estresados - datos["deudas"]
+        dscr, estado_credito = _evaluar_credito(flujo_estresado, cuota_estresada)
+
+        return Response({
+            "PersonaId": datos["persona"].id,
+            "ReduccionIngresos": float(reduccion_ingresos),
+            "IncrementoGastos": float(incremento_gastos),
+            "IncrementoTasaInteres": float(incremento_tasa),
+            "IngresoEstresado": float(ingreso_estresado.quantize(Decimal("0.01"))),
+            "GastosEstresados": float(gastos_estresados.quantize(Decimal("0.01"))),
+            "DeudasMensuales": float(datos["deudas"]),
+            "TasaInteresEstresada": float(tasa_estresada),
+            "CuotaMensualEstresada": float(cuota_estresada),
+            "FlujoCajaLibre": float(flujo_estresado.quantize(Decimal("0.01"))),
+            "DSCR": float(dscr) if dscr is not None else None,
+            "EstadoCredito": estado_credito,
+        })
 
 class TestAmortizacion(APIView):
     permission_classes = [IsAuthenticated]
